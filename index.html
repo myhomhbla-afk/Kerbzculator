@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Kerbzculator — ROI Estimator</title>
+  <style>
+    :root { --bg:#ffffff; --text:#111; --muted:#666; --card:#fff4ec; --border:#ddd; --accent:#ff6600; }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text)}
+    .wrap{max-width:1100px;margin:0 auto;padding:24px 20px}
+    h1{font-size:32px;margin:0 0 4px;font-weight:800;color:var(--accent)}
+    p.muted{color:var(--muted);margin:0}
+    .grid{display:grid;gap:16px}
+    .g-2{grid-template-columns:repeat(2,minmax(0,1fr))}
+    .g-3{grid-template-columns:repeat(3,minmax(0,1fr))}
+    .g-4{grid-template-columns:repeat(4,minmax(0,1fr))}
+    @media (max-width: 860px){ .g-2,.g-3,.g-4{grid-template-columns:1fr} }
+    .card{background:var(--card);border-radius:16px;padding:16px}
+    .tile{background:var(--card);border-radius:16px;padding:16px}
+    label{display:block;font-size:13px;margin:0 0 6px;color:#333;font-weight:600}
+    select,input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;font-size:14px}
+    .stat-label{font-size:15px}
+    .stat-value{font-size:26px;font-weight:800;margin-top:4px}
+    .row{display:flex;gap:8px;align-items:center}
+    .btn{padding:10px 14px;border:1px solid var(--accent);border-radius:14px;background:var(--accent);color:#fff;cursor:pointer;font-weight:600}
+    .btn:hover{background:#e65c00;border-color:#e65c00}
+    .tiny{font-size:12px;color:var(--muted)}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Kerbzculator</h1>
+    <p class="muted">Quick ROI estimate for renting your track car. State selector includes all US states (using national-average multipliers).</p>
+
+    <div class="grid g-3" style="margin-top:18px">
+      <div>
+        <label>State (or National Average)</label>
+        <select id="region"></select>
+      </div>
+      <div>
+        <label>Car Model</label>
+        <select id="model"></select>
+      </div>
+      <div>
+        <label>Daily rate used</label>
+        <select id="rate"></select>
+        <div class="tiny">Tip: choose "Use model default" to auto-use the model’s typical daily rate.</div>
+      </div>
+    </div>
+
+    <div class="grid g-2" style="margin-top:16px">
+      <div class="tile"><div class="stat-label">Selected model:</div><div id="modelName" class="stat-value">—</div></div>
+      <div class="tile"><div class="stat-label">Annualized ROI:</div><div id="roi" class="stat-value">—</div></div>
+    </div>
+
+    <div class="grid g-4" style="margin-top:16px">
+      <div class="tile"><div class="stat-label">Estimated value:</div><div id="value" class="stat-value">—</div></div>
+      <div class="tile"><div class="stat-label">Daily rate used:</div><div id="daily" class="stat-value">—</div></div>
+      <div class="tile"><div class="stat-label">Annual gross:</div><div id="gross" class="stat-value">—</div></div>
+      <div class="tile"><div class="stat-label">Net after fees+consumables:</div><div id="net" class="stat-value">—</div></div>
+    </div>
+
+    <div class="card" style="margin-top:18px">
+      <h3 style="margin:0 0 10px;font-size:18px">Adjust assumptions</h3>
+      <div class="grid g-4">
+        <div>
+          <label>Avg. rented days / month</label>
+          <input id="daysPerMonth" type="number" min="0" step="1">
+        </div>
+        <div>
+          <label>Platform fee (e.g., 0.20 = 20%)</label>
+          <input id="platformFee" type="number" min="0" step="0.01">
+        </div>
+        <div>
+          <label>Insurance fee (e.g., 0.10 = 10%)</label>
+          <input id="insuranceFee" type="number" min="0" step="0.01">
+        </div>
+        <div>
+          <label>Annual brakes/consumables ($/yr)</label>
+          <input id="consumablesAnnual" type="number" min="0" step="100">
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button id="resetBtn" class="btn">Reset</button>
+        <span class="tiny">Earnings = (daily × days/month × 12) − (platform + insurance) − consumables. Loan cost ≈ value × 6% APR.</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // State list (all multipliers set to 1.00 for now — national average).
+    const REGIONS = [
+      { id: "US", label: "National Average", multiplier: 1.00 },
+      { id: "AL", label: "Alabama", multiplier: 1.00 },
+      { id: "AK", label: "Alaska", multiplier: 1.00 },
+      { id: "AZ", label: "Arizona", multiplier: 1.00 },
+      { id: "AR", label: "Arkansas", multiplier: 1.00 },
+      { id: "CA", label: "California", multiplier: 1.00 },
+      { id: "CO", label: "Colorado", multiplier: 1.00 },
+      { id: "CT", label: "Connecticut", multiplier: 1.00 },
+      { id: "DE", label: "Delaware", multiplier: 1.00 },
+      { id: "DC", label: "District of Columbia", multiplier: 1.00 },
+      { id: "FL", label: "Florida", multiplier: 1.00 },
+      { id: "GA", label: "Georgia", multiplier: 1.00 },
+      { id: "HI", label: "Hawaii", multiplier: 1.00 },
+      { id: "ID", label: "Idaho", multiplier: 1.00 },
+      { id: "IL", label: "Illinois", multiplier: 1.00 },
+      { id: "IN", label: "Indiana", multiplier: 1.00 },
+      { id: "IA", label: "Iowa", multiplier: 1.00 },
+      { id: "KS", label: "Kansas", multiplier: 1.00 },
+      { id: "KY", label: "Kentucky", multiplier: 1.00 },
+      { id: "LA", label: "Louisiana", multiplier: 1.00 },
+      { id: "ME", label: "Maine", multiplier: 1.00 },
+      { id: "MD", label: "Maryland", multiplier: 1.00 },
+      { id: "MA", label: "Massachusetts", multiplier: 1.00 },
+      { id: "MI", label: "Michigan", multiplier: 1.00 },
+      { id: "MN", label: "Minnesota", multiplier: 1.00 },
+      { id: "MS", label: "Mississippi", multiplier: 1.00 },
+      { id: "MO", label: "Missouri", multiplier: 1.00 },
+      { id: "MT", label: "Montana", multiplier: 1.00 },
+      { id: "NE", label: "Nebraska", multiplier: 1.00 },
+      { id: "NV", label: "Nevada", multiplier: 1.00 },
+      { id: "NH", label: "New Hampshire", multiplier: 1.00 },
+      { id: "NJ", label: "New Jersey", multiplier: 1.00 },
+      { id: "NM", label: "New Mexico", multiplier: 1.00 },
+      { id: "NY", label: "New York", multiplier: 1.00 },
+      { id: "NC", label: "North Carolina", multiplier: 1.00 },
+      { id: "ND", label: "North Dakota", multiplier: 1.00 },
+      { id: "OH", label: "Ohio", multiplier: 1.00 },
+      { id: "OK", label: "Oklahoma", multiplier: 1.00 },
+      { id: "OR", label: "Oregon", multiplier: 1.00 },
+      { id: "PA", label: "Pennsylvania", multiplier: 1.00 },
+      { id: "RI", label: "Rhode Island", multiplier: 1.00 },
+      { id: "SC", label: "South Carolina", multiplier: 1.00 },
+      { id: "SD", label: "South Dakota", multiplier: 1.00 },
+      { id: "TN", label: "Tennessee", multiplier: 1.00 },
+      { id: "TX", label: "Texas", multiplier: 1.00 },
+      { id: "UT", label: "Utah", multiplier: 1.00 },
+      { id: "VT", label: "Vermont", multiplier: 1.00 },
+      { id: "VA", label: "Virginia", multiplier: 1.00 },
+      { id: "WA", label: "Washington", multiplier: 1.00 },
+      { id: "WV", label: "West Virginia", multiplier: 1.00 },
+      { id: "WI", label: "Wisconsin", multiplier: 1.00 },
+      { id: "WY", label: "Wyoming", multiplier: 1.00 }
+    ];
+
+    const MODELS = [
+      { id: "porsche_gt3_992",   name: "Porsche 911 GT3 (992)",        baseValue: 248000, baseDaily: 2499 },
+      { id: "porsche_gt4_718",   name: "Porsche Cayman GT4 (718)",     baseValue: 119000, baseDaily: 1199 },
+      { id: "porsche_gt3rs_992", name: "Porsche 911 GT3 RS (992)",     baseValue: 320000, baseDaily: 3199 },
+      { id: "audi_r8",           name: "Audi R8 V10 Performance",      baseValue: 182000, baseDaily: 1799 },
+      { id: "nissan_gtr",        name: "Nissan GT-R (R35)",            baseValue: 115000, baseDaily: 1099 },
+      { id: "chevy_corvette_z06",name: "Chevrolet Corvette Z06 (C8)",  baseValue: 119995, baseDaily: 1199 },
+      { id: "mercedes_gt_black", name: "Mercedes-AMG GT Black Series", baseValue: 325000, baseDaily: 3299 },
+      { id: "ferrari_488_gtb",   name: "Ferrari 488 GTB",              baseValue: 280000, baseDaily: 2899 },
+      { id: "lamborghini_huracan", name: "Lamborghini Huracán Evo",    baseValue: 245000, baseDaily: 2599 },
+      { id: "toyota_supra_a90",  name: "Toyota GR Supra 3.0 (A90)",    baseValue: 44500,  baseDaily: 449 },
+      { id: "mazda_miata_nd2",   name: "Mazda MX-5 Miata (ND2)",       baseValue: 27500,  baseDaily: 229 },
+      { id: "honda_civic_fl5",   name: "Honda Civic Type R (FL5)",     baseValue: 45990,  baseDaily: 429 },
+      { id: "vw_golf_r_mk8",     name: "Volkswagen Golf R (MK8)",      baseValue: 45385,  baseDaily: 389 },
+      { id: "hyundai_elantra_n", name: "Hyundai Elantra N",            baseValue: 35000,  baseDaily: 329 },
+      { id: "subaru_brz",        name: "Subaru BRZ (ZD8)",             baseValue: 30995,  baseDaily: 279 },
+      { id: "nissan_z_rz34",     name: "Nissan Z Performance (RZ34)",  baseValue: 46990,  baseDaily: 449 },
+      { id: "ford_mustang_gt",   name: "Ford Mustang GT (S650)",       baseValue: 42995,  baseDaily: 399 },
+      { id: "chevy_camaro_1le",  name: "Chevrolet Camaro SS 1LE",      baseValue: 48995,  baseDaily: 449 },
+      { id: "dodge_challenger",  name: "Dodge Challenger Scat Pack",   baseValue: 49995,  baseDaily: 459 },
+      { id: "bmw_m3_g80",        name: "BMW M3 (G80)",                 baseValue: 71200,  baseDaily: 699 },
+      { id: "bmw_m2_g87",        name: "BMW M2 (G87)",                 baseValue: 63195,  baseDaily: 579 },
+      { id: "audi_rs3",          name: "Audi RS3 (8Y)",                baseValue: 61450,  baseDaily: 549 },
+      { id: "mercedes_c63",      name: "Mercedes-AMG C63 (W206)",      baseValue: 89950,  baseDaily: 899 }
+    ];
+
+    const RATE_PRESETS = [
+      { id: "default", label: "Use model default" },
+      { id: "199", label: "$199/day", value: 199 },
+      { id: "299", label: "$299/day", value: 299 },
+      { id: "399", label: "$399/day", value: 399 },
+      { id: "499", label: "$499/day", value: 499 },
+      { id: "699", label: "$699/day", value: 699 },
+      { id: "999", label: "$999/day", value: 999 },
+      { id: "1499", label: "$1,499/day", value: 1499 },
+      { id: "1999", label: "$1,999/day", value: 1999 },
+      { id: "2499", label: "$2,499/day", value: 2499 },
+      { id: "2999", label: "$2,999/day", value: 2999 }
+    ];
+
+    const DEFAULTS = {
+      daysPerMonth: 3,
+      monthsActive: 12,
+      loanAPR: 0.06,
+      platformFee: 0.20,
+      insuranceFee: 0.10,
+      consumablesAnnual: 2500
+    };
+
+    // DOM refs
+    const el = (id) => document.getElementById(id);
+    const regionSel = el('region');
+    const modelSel = el('model');
+    const rateSel = el('rate');
+    const daysPerMonth = el('daysPerMonth');
+    const platformFee = el('platformFee');
+    const insuranceFee = el('insuranceFee');
+    const consumablesAnnual = el('consumablesAnnual');
+    const modelName = el('modelName');
+    const roi = el('roi');
+    const value = el('value');
+    const daily = el('daily');
+    const gross = el('gross');
+    const net = el('net');
+    const resetBtn = el('resetBtn');
+
+    function money(n){ return n.toLocaleString(undefined,{style:'currency',currency:'USD',maximumFractionDigits:0}); }
+    function annualLoanCost(principal, apr){ return principal * apr; }
+
+    function populate(){
+      regionSel.innerHTML = REGIONS.map(r => `<option value="${r.id}">${r.label}</option>`).join('');
+      modelSel.innerHTML = MODELS.map(m => `<option value="${m.id}">${m.name}</option>`).join('');
+      rateSel.innerHTML = RATE_PRESETS.map(r => `<option value="${r.id}">${r.label}</option>`).join('');
+      daysPerMonth.value = DEFAULTS.daysPerMonth;
+      platformFee.value = DEFAULTS.platformFee;
+      insuranceFee.value = DEFAULTS.insuranceFee;
+      consumablesAnnual.value = DEFAULTS.consumablesAnnual;
+    }
+
+    function calcAndRender(){
+      const region = REGIONS.find(r => r.id === regionSel.value) || REGIONS[0];
+      const model = MODELS.find(m => m.id === modelSel.value) || MODELS[0];
+      const preset = RATE_PRESETS.find(r => r.id === rateSel.value) || RATE_PRESETS[0];
+
+      const baseDaily = model.baseDaily * region.multiplier; // multiplier is 1.00 for all states for now
+      const usedDaily = preset.value ? preset.value : baseDaily;
+      const carValue = model.baseValue * region.multiplier;
+
+      const dpm = parseFloat(daysPerMonth.value || 0);
+      const pf  = parseFloat(platformFee.value || 0);
+      const inf = parseFloat(insuranceFee.value || 0);
+      const cons= parseFloat(consumablesAnnual.value || 0);
+
+      const annualGross = usedDaily * dpm * DEFAULTS.monthsActive;
+      const fees = annualGross * pf + annualGross * inf;
+      const annualNet = Math.max(0, annualGross - fees - cons);
+      const loan = annualLoanCost(carValue, DEFAULTS.loanAPR);
+      const roiPct = carValue > 0 ? ((annualNet - loan) / carValue) * 100 : 0;
+
+      modelName.textContent = model.name;
+      roi.textContent = roiPct.toFixed(1) + '%';
+      value.textContent = money(carValue);
+      daily.textContent = money(usedDaily);
+      gross.textContent = money(annualGross);
+      net.textContent = money(annualNet);
+    }
+
+    function attach(){
+      [regionSel, modelSel, rateSel, daysPerMonth, platformFee, insuranceFee, consumablesAnnual]
+        .forEach(elm => elm.addEventListener('input', calcAndRender));
+      resetBtn.addEventListener('click', () => {
+        daysPerMonth.value = DEFAULTS.daysPerMonth;
+        platformFee.value = DEFAULTS.platformFee;
+        insuranceFee.value = DEFAULTS.insuranceFee;
+        consumablesAnnual.value = DEFAULTS.consumablesAnnual;
+        calcAndRender();
+      });
+    }
+
+    populate();
+    attach();
+    calcAndRender();
+  </script>
+</body>
+</html>
